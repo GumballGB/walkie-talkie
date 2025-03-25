@@ -32,6 +32,12 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+#define AUDIO_BUFFER_SIZE 1024
+
+int16_t audioBuffer[AUDIO_BUFFER_SIZE];  // Buffer to store PCM data
+uint8_t buttonPressed = 0;
+uint8_t listening = 0;
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -72,14 +78,41 @@ static void MX_DFSDM1_Init(void);
 
 //Button Interrupt, Toggle LED for debug
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-	if (GPIO_Pin == B_BUTTON_Pin) {
-		HAL_GPIO_TogglePin(G_LED2_GPIO_Port, G_LED2_Pin);
 
-	}
+	if (GPIO_Pin == B_BUTTON_Pin) {
+			// Set buttonPressed flag to true
+			buttonPressed = 1;
+
+			// Toggle LED for debug
+			HAL_GPIO_TogglePin(G_LED2_GPIO_Port, G_LED2_Pin);
+
+			// Start the listening process (if not already listening)
+			if (!listening) {
+				listening = 1;
+				// Start DFSDM to capture audio for 1 second
+				HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, (int32_t *)audioBuffer, AUDIO_BUFFER_SIZE);
+				// Start a timer for 1 second
+			}
+		}
 
 }
 
 
+void StartAudioCapture(void) {
+    // Start the DFSDM filter to capture audio
+    HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, (int32_t *)audioBuffer, AUDIO_BUFFER_SIZE);
+}
+
+void SendAudioDataToUART(void) {
+    // Transmit audio buffer data via UART (convert to bytes for transmission)
+    HAL_UART_Transmit(&huart1, (uint8_t*)audioBuffer, AUDIO_BUFFER_SIZE * sizeof(int16_t), HAL_MAX_DELAY);
+}
+
+
+void StartAudioCapture(void) {
+    // Start the DFSDM filter to capture audio
+    HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, (int32_t *)audioBuffer, AUDIO_BUFFER_SIZE);
+}
 
 /* USER CODE END 0 */
 
@@ -117,7 +150,12 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM2_Init();
   MX_DFSDM1_Init();
+
+
   /* USER CODE BEGIN 2 */
+
+  // Start Timer2 to generate the clock signal for the microphone
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
 
   /* USER CODE END 2 */
 
@@ -126,6 +164,23 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
+
+
+	  if (!listening) {
+	          // Start capturing audio
+	          StartAudioCapture();
+	          listening = 1;  // Indicate that we are listening
+	      }
+
+
+	  SendAudioDataToUART();
+
+	  // Here you can check if the buffer is full, process the data, or send it somewhere.
+	      // For example, to check if the buffer is full:
+//	      if (listening && /* condition to check if DMA transfer is complete */) {
+//	          // Do something with the audioBuffer, e.g., process it or send it via UART.
+//	          listening = 0;  // Stop listening, or reset for next capture.
+//	      }
 
     /* USER CODE BEGIN 3 */
   }
@@ -200,9 +255,9 @@ static void MX_DFSDM1_Init(void)
   hdfsdm1_filter0.Instance = DFSDM1_Filter0;
   hdfsdm1_filter0.Init.RegularParam.Trigger = DFSDM_FILTER_SW_TRIGGER;
   hdfsdm1_filter0.Init.RegularParam.FastMode = DISABLE;
-  hdfsdm1_filter0.Init.RegularParam.DmaMode = DISABLE;
+  hdfsdm1_filter0.Init.RegularParam.DmaMode = ENABLE;
   hdfsdm1_filter0.Init.FilterParam.SincOrder = DFSDM_FILTER_FASTSINC_ORDER;
-  hdfsdm1_filter0.Init.FilterParam.Oversampling = 1;
+  hdfsdm1_filter0.Init.FilterParam.Oversampling = 10;
   hdfsdm1_filter0.Init.FilterParam.IntOversampling = 1;
   if (HAL_DFSDM_FilterInit(&hdfsdm1_filter0) != HAL_OK)
   {
@@ -218,7 +273,7 @@ static void MX_DFSDM1_Init(void)
   hdfsdm1_channel0.Init.SerialInterface.Type = DFSDM_CHANNEL_SPI_RISING;
   hdfsdm1_channel0.Init.SerialInterface.SpiClock = DFSDM_CHANNEL_SPI_CLOCK_EXTERNAL;
   hdfsdm1_channel0.Init.Awd.FilterOrder = DFSDM_CHANNEL_FASTSINC_ORDER;
-  hdfsdm1_channel0.Init.Awd.Oversampling = 1;
+  hdfsdm1_channel0.Init.Awd.Oversampling = 64;
   hdfsdm1_channel0.Init.Offset = 0;
   hdfsdm1_channel0.Init.RightBitShift = 0x00;
   if (HAL_DFSDM_ChannelInit(&hdfsdm1_channel0) != HAL_OK)
@@ -302,9 +357,9 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
+  htim2.Init.Prescaler = 8399;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 4294967295;
+  htim2.Init.Period = 9999;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
