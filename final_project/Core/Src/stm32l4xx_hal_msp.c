@@ -115,11 +115,9 @@ void HAL_DFSDM_FilterMspInit(DFSDM_Filter_HandleTypeDef* hdfsdm_filter)
     }
 
     __HAL_RCC_GPIOE_CLK_ENABLE();
-    __HAL_RCC_GPIOD_CLK_ENABLE();
     /**DFSDM1 GPIO Configuration
     PE7     ------> DFSDM1_DATIN2
     PE9     ------> DFSDM1_CKOUT
-    PD3     ------> DFSDM1_DATIN0
     */
     GPIO_InitStruct.Pin = GPIO_PIN_7|GPIO_PIN_9;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -127,13 +125,6 @@ void HAL_DFSDM_FilterMspInit(DFSDM_Filter_HandleTypeDef* hdfsdm_filter)
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF6_DFSDM1;
     HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
-
-    GPIO_InitStruct.Pin = GPIO_PIN_3;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF6_DFSDM1;
-    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /* USER CODE BEGIN DFSDM1_MspInit 1 */
 
@@ -199,11 +190,9 @@ void HAL_DFSDM_ChannelMspInit(DFSDM_Channel_HandleTypeDef* hdfsdm_channel)
     }
 
     __HAL_RCC_GPIOE_CLK_ENABLE();
-    __HAL_RCC_GPIOD_CLK_ENABLE();
     /**DFSDM1 GPIO Configuration
     PE7     ------> DFSDM1_DATIN2
     PE9     ------> DFSDM1_CKOUT
-    PD3     ------> DFSDM1_DATIN0
     */
     GPIO_InitStruct.Pin = GPIO_PIN_7|GPIO_PIN_9;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -211,13 +200,6 @@ void HAL_DFSDM_ChannelMspInit(DFSDM_Channel_HandleTypeDef* hdfsdm_channel)
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF6_DFSDM1;
     HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
-
-    GPIO_InitStruct.Pin = GPIO_PIN_3;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF6_DFSDM1;
-    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /* USER CODE BEGIN DFSDM1_MspInit 1 */
 
@@ -248,11 +230,8 @@ void HAL_DFSDM_FilterMspDeInit(DFSDM_Filter_HandleTypeDef* hdfsdm_filter)
     /**DFSDM1 GPIO Configuration
     PE7     ------> DFSDM1_DATIN2
     PE9     ------> DFSDM1_CKOUT
-    PD3     ------> DFSDM1_DATIN0
     */
     HAL_GPIO_DeInit(GPIOE, GPIO_PIN_7|GPIO_PIN_9);
-
-    HAL_GPIO_DeInit(GPIOD, GPIO_PIN_3);
 
     /* DFSDM1 DMA DeInit */
     HAL_DMA_DeInit(hdfsdm_filter->hdmaInj);
@@ -284,11 +263,8 @@ void HAL_DFSDM_ChannelMspDeInit(DFSDM_Channel_HandleTypeDef* hdfsdm_channel)
     /**DFSDM1 GPIO Configuration
     PE7     ------> DFSDM1_DATIN2
     PE9     ------> DFSDM1_CKOUT
-    PD3     ------> DFSDM1_DATIN0
     */
     HAL_GPIO_DeInit(GPIOE, GPIO_PIN_7|GPIO_PIN_9);
-
-    HAL_GPIO_DeInit(GPIOD, GPIO_PIN_3);
 
   /* USER CODE BEGIN DFSDM1_MspDeInit 1 */
 
