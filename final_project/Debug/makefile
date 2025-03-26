@@ -1,6 +1,6 @@
 ################################################################################
 # Automatically-generated file. Do not edit!
-# Toolchain: GNU Tools for STM32 (13.3.rel1)
+# Toolchain: GNU Tools for STM32 (12.3.rel1)
 ################################################################################
 
 -include ../makefile.init
@@ -60,8 +60,8 @@ all: main-build
 main-build: final_project.elf secondary-outputs
 
 # Tool invocations
-final_project.elf final_project.map: $(OBJS) $(USER_OBJS) C:\Users\Ansle\Documents\GitHub\walkie-talkie\final_project\STM32L4S5VITX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "final_project.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\Ansle\Documents\GitHub\walkie-talkie\final_project\STM32L4S5VITX_FLASH.ld" --specs=nosys.specs -Wl,-Map="final_project.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+final_project.elf final_project.map: $(OBJS) $(USER_OBJS) /Users/ansleanalbert/Documents/GitHub/walkie-talkie/final_project/STM32L4S5VITX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "final_project.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/Users/ansleanalbert/Documents/GitHub/walkie-talkie/final_project/STM32L4S5VITX_FLASH.ld" --specs=nosys.specs -Wl,-Map="final_project.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

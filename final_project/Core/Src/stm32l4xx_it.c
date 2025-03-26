@@ -56,7 +56,6 @@
 
 /* External variables --------------------------------------------------------*/
 extern DMA_HandleTypeDef hdma_dfsdm1_flt0;
-extern DFSDM_Filter_HandleTypeDef hdfsdm1_filter0;
 extern TIM_HandleTypeDef htim2;
 /* USER CODE BEGIN EV */
 
@@ -240,20 +239,6 @@ void EXTI15_10_IRQHandler(void)
   /* USER CODE BEGIN EXTI15_10_IRQn 1 */
 
   /* USER CODE END EXTI15_10_IRQn 1 */
-}
-
-/**
-  * @brief This function handles DFSDM1 filter0 global interrupt.
-  */
-void DFSDM1_FLT0_IRQHandler(void)
-{
-  /* USER CODE BEGIN DFSDM1_FLT0_IRQn 0 */
-
-  /* USER CODE END DFSDM1_FLT0_IRQn 0 */
-  HAL_DFSDM_IRQHandler(&hdfsdm1_filter0);
-  /* USER CODE BEGIN DFSDM1_FLT0_IRQn 1 */
-
-  /* USER CODE END DFSDM1_FLT0_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */

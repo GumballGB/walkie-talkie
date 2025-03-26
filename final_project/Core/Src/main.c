@@ -32,12 +32,6 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define AUDIO_BUFFER_SIZE 1024
-
-int16_t audioBuffer[AUDIO_BUFFER_SIZE];  // Buffer to store PCM data
-uint8_t buttonPressed = 0;
-uint8_t listening = 0;
-
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -47,7 +41,7 @@ uint8_t listening = 0;
 
 /* Private variables ---------------------------------------------------------*/
 DFSDM_Filter_HandleTypeDef hdfsdm1_filter0;
-DFSDM_Channel_HandleTypeDef hdfsdm1_channel0;
+DFSDM_Channel_HandleTypeDef hdfsdm1_channel2;
 DMA_HandleTypeDef hdma_dfsdm1_flt0;
 
 I2C_HandleTypeDef hi2c2;
@@ -57,6 +51,13 @@ TIM_HandleTypeDef htim2;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
+
+#define AUDIO_BUFFER_SIZE 1024
+int32_t RecBuf[AUDIO_BUFFER_SIZE]; //storing 8 bits
+int32_t PlayBuf[AUDIO_BUFFER_SIZE];
+
+uint8_t DmaRecHalfBuffCplt=0;
+uint8_t DmaRecBuffCplt=0;
 
 /* USER CODE END PV */
 
@@ -80,39 +81,15 @@ static void MX_DFSDM1_Init(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 	if (GPIO_Pin == B_BUTTON_Pin) {
-			// Set buttonPressed flag to true
-			buttonPressed = 1;
 
 			// Toggle LED for debug
 			HAL_GPIO_TogglePin(G_LED2_GPIO_Port, G_LED2_Pin);
-
-			// Start the listening process (if not already listening)
-			if (!listening) {
-				listening = 1;
-				// Start DFSDM to capture audio for 1 second
-				HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, (int32_t *)audioBuffer, AUDIO_BUFFER_SIZE);
-				// Start a timer for 1 second
-			}
 		}
 
 }
 
 
-void StartAudioCapture(void) {
-    // Start the DFSDM filter to capture audio
-    HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, (int32_t *)audioBuffer, AUDIO_BUFFER_SIZE);
-}
 
-void SendAudioDataToUART(void) {
-    // Transmit audio buffer data via UART (convert to bytes for transmission)
-    HAL_UART_Transmit(&huart1, (uint8_t*)audioBuffer, AUDIO_BUFFER_SIZE * sizeof(int16_t), HAL_MAX_DELAY);
-}
-
-
-void StartAudioCapture(void) {
-    // Start the DFSDM filter to capture audio
-    HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, (int32_t *)audioBuffer, AUDIO_BUFFER_SIZE);
-}
 
 /* USER CODE END 0 */
 
@@ -124,7 +101,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+	uint16_t i = 0;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -152,10 +129,12 @@ int main(void)
   MX_DFSDM1_Init();
 
 
+
   /* USER CODE BEGIN 2 */
 
-  // Start Timer2 to generate the clock signal for the microphone
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+
+  HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE);
+
 
   /* USER CODE END 2 */
 
@@ -164,25 +143,30 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-
-
-	  if (!listening) {
-	          // Start capturing audio
-	          StartAudioCapture();
-	          listening = 1;  // Indicate that we are listening
-	      }
-
-
-	  SendAudioDataToUART();
-
-	  // Here you can check if the buffer is full, process the data, or send it somewhere.
-	      // For example, to check if the buffer is full:
-//	      if (listening && /* condition to check if DMA transfer is complete */) {
-//	          // Do something with the audioBuffer, e.g., process it or send it via UART.
-//	          listening = 0;  // Stop listening, or reset for next capture.
-//	      }
-
     /* USER CODE BEGIN 3 */
+
+
+
+		if (DmaRecHalfBuffCplt == 1) {
+
+			for(i=0; i<AUDIO_BUFFER_SIZE/2; i++)
+				PlayBuf[i] = RecBuf[i]>>8;
+
+
+			DmaRecHalfBuffCplt=0;
+		}
+
+		if (DmaRecBuffCplt == 1) {
+
+
+			for(i=AUDIO_BUFFER_SIZE/2; i<AUDIO_BUFFER_SIZE; i++)
+				PlayBuf[i] = RecBuf[i]>>8;
+
+
+			DmaRecBuffCplt=0;
+		}
+
+
   }
   /* USER CODE END 3 */
 }
@@ -198,7 +182,7 @@ void SystemClock_Config(void)
 
   /** Configure the main internal regulator output voltage
   */
-  if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1_BOOST) != HAL_OK)
+  if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
   {
     Error_Handler();
   }
@@ -213,7 +197,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
   RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 60;
+  RCC_OscInitStruct.PLL.PLLN = 40;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
@@ -231,7 +215,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
   {
     Error_Handler();
   }
@@ -254,33 +238,33 @@ static void MX_DFSDM1_Init(void)
   /* USER CODE END DFSDM1_Init 1 */
   hdfsdm1_filter0.Instance = DFSDM1_Filter0;
   hdfsdm1_filter0.Init.RegularParam.Trigger = DFSDM_FILTER_SW_TRIGGER;
-  hdfsdm1_filter0.Init.RegularParam.FastMode = DISABLE;
+  hdfsdm1_filter0.Init.RegularParam.FastMode = ENABLE;
   hdfsdm1_filter0.Init.RegularParam.DmaMode = ENABLE;
-  hdfsdm1_filter0.Init.FilterParam.SincOrder = DFSDM_FILTER_FASTSINC_ORDER;
-  hdfsdm1_filter0.Init.FilterParam.Oversampling = 10;
+  hdfsdm1_filter0.Init.FilterParam.SincOrder = DFSDM_FILTER_SINC3_ORDER;
+  hdfsdm1_filter0.Init.FilterParam.Oversampling = 250;
   hdfsdm1_filter0.Init.FilterParam.IntOversampling = 1;
   if (HAL_DFSDM_FilterInit(&hdfsdm1_filter0) != HAL_OK)
   {
     Error_Handler();
   }
-  hdfsdm1_channel0.Instance = DFSDM1_Channel0;
-  hdfsdm1_channel0.Init.OutputClock.Activation = DISABLE;
-  hdfsdm1_channel0.Init.OutputClock.Selection = DFSDM_CHANNEL_OUTPUT_CLOCK_SYSTEM;
-  hdfsdm1_channel0.Init.OutputClock.Divider = 2;
-  hdfsdm1_channel0.Init.Input.Multiplexer = DFSDM_CHANNEL_EXTERNAL_INPUTS;
-  hdfsdm1_channel0.Init.Input.DataPacking = DFSDM_CHANNEL_STANDARD_MODE;
-  hdfsdm1_channel0.Init.Input.Pins = DFSDM_CHANNEL_SAME_CHANNEL_PINS;
-  hdfsdm1_channel0.Init.SerialInterface.Type = DFSDM_CHANNEL_SPI_RISING;
-  hdfsdm1_channel0.Init.SerialInterface.SpiClock = DFSDM_CHANNEL_SPI_CLOCK_EXTERNAL;
-  hdfsdm1_channel0.Init.Awd.FilterOrder = DFSDM_CHANNEL_FASTSINC_ORDER;
-  hdfsdm1_channel0.Init.Awd.Oversampling = 64;
-  hdfsdm1_channel0.Init.Offset = 0;
-  hdfsdm1_channel0.Init.RightBitShift = 0x00;
-  if (HAL_DFSDM_ChannelInit(&hdfsdm1_channel0) != HAL_OK)
+  hdfsdm1_channel2.Instance = DFSDM1_Channel2;
+  hdfsdm1_channel2.Init.OutputClock.Activation = ENABLE;
+  hdfsdm1_channel2.Init.OutputClock.Selection = DFSDM_CHANNEL_OUTPUT_CLOCK_SYSTEM;
+  hdfsdm1_channel2.Init.OutputClock.Divider = 40;
+  hdfsdm1_channel2.Init.Input.Multiplexer = DFSDM_CHANNEL_EXTERNAL_INPUTS;
+  hdfsdm1_channel2.Init.Input.DataPacking = DFSDM_CHANNEL_STANDARD_MODE;
+  hdfsdm1_channel2.Init.Input.Pins = DFSDM_CHANNEL_SAME_CHANNEL_PINS;
+  hdfsdm1_channel2.Init.SerialInterface.Type = DFSDM_CHANNEL_SPI_RISING;
+  hdfsdm1_channel2.Init.SerialInterface.SpiClock = DFSDM_CHANNEL_SPI_CLOCK_INTERNAL;
+  hdfsdm1_channel2.Init.Awd.FilterOrder = DFSDM_CHANNEL_FASTSINC_ORDER;
+  hdfsdm1_channel2.Init.Awd.Oversampling = 1;
+  hdfsdm1_channel2.Init.Offset = 0;
+  hdfsdm1_channel2.Init.RightBitShift = 0x00;
+  if (HAL_DFSDM_ChannelInit(&hdfsdm1_channel2) != HAL_OK)
   {
     Error_Handler();
   }
-  if (HAL_DFSDM_FilterConfigRegChannel(&hdfsdm1_filter0, DFSDM_CHANNEL_0, DFSDM_CONTINUOUS_CONV_ON) != HAL_OK)
+  if (HAL_DFSDM_FilterConfigRegChannel(&hdfsdm1_filter0, DFSDM_CHANNEL_2, DFSDM_CONTINUOUS_CONV_ON) != HAL_OK)
   {
     Error_Handler();
   }
@@ -306,7 +290,7 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.Timing = 0x30A175AB;
+  hi2c2.Init.Timing = 0x10D19CE4;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
@@ -352,14 +336,15 @@ static void MX_TIM2_Init(void)
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
 
   /* USER CODE BEGIN TIM2_Init 1 */
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 8399;
+  htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 9999;
+  htim2.Init.Period = 4294967295;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -371,15 +356,28 @@ static void MX_TIM2_Init(void)
   {
     Error_Handler();
   }
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE BEGIN TIM2_Init 2 */
 
   /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
 
 }
 
@@ -461,8 +459,9 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
@@ -490,6 +489,23 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void HAL_DFSDM_FilterRegConvHalfCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
+{
+
+	//HAL_GPIO_TogglePin(G_LED2_GPIO_Port, G_LED2_Pin);
+
+	DmaRecHalfBuffCplt=1;
+}
+
+void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
+{
+
+	//HAL_GPIO_TogglePin(G_LED2_GPIO_Port, G_LED2_Pin);
+
+	DmaRecBuffCplt=1;
+}
+
 
 /* USER CODE END 4 */
 
