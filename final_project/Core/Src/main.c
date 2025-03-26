@@ -53,11 +53,15 @@ UART_HandleTypeDef huart1;
 /* USER CODE BEGIN PV */
 
 #define AUDIO_BUFFER_SIZE 1024
+#define RECORDING_TIME 5000  // 5 seconds
 int32_t RecBuf[AUDIO_BUFFER_SIZE]; //storing 8 bits
 int32_t PlayBuf[AUDIO_BUFFER_SIZE];
 
 uint8_t DmaRecHalfBuffCplt=0;
 uint8_t DmaRecBuffCplt=0;
+
+uint32_t recordingStartTime = 0;
+uint8_t isRecording = 0;
 
 /* USER CODE END PV */
 
@@ -73,19 +77,63 @@ static void MX_DFSDM1_Init(void);
 
 /* USER CODE END PFP */
 
-/* Private user code ---------------------------------------------------------*/
+/* Private user code -------------------------------------a--------------------*/
 /* USER CODE BEGIN 0 */
 
 
 //Button Interrupt, Toggle LED for debug
+//Button Interrupt, Toggle LED for debug
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+    if (GPIO_Pin == B_BUTTON_Pin) {
+        // Check if the button is pressed
+        if (HAL_GPIO_ReadPin(B_BUTTON_GPIO_Port, B_BUTTON_Pin) == GPIO_PIN_SET) {
 
-	if (GPIO_Pin == B_BUTTON_Pin) {
+            if (isRecording) {
+                // Stop the current recording before starting a new one
+                HAL_DFSDM_FilterRegularStop(&hdfsdm1_filter0);
+                HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_RESET);
+                isRecording = 0;
+            }
 
-			// Toggle LED for debug
-			HAL_GPIO_TogglePin(G_LED2_GPIO_Port, G_LED2_Pin);
-		}
+            // Start a new recording
+            HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE);
+            HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_SET); // Indicate recording is in progress
+            recordingStartTime = HAL_GetTick();  // Record the time the recording started
+            isRecording = 1;
 
+            HAL_TIM_Base_Start_IT(&htim2);  // Start the timer interrupt
+        }
+    }
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+    // Check if 5 seconds have passed
+    if (isRecording && (HAL_GetTick() - recordingStartTime) >= RECORDING_TIME) {
+        // Stop recording after 5 seconds
+        HAL_DFSDM_FilterRegularStop(&hdfsdm1_filter0);
+        // Toggle LED to indicate recording has stopped
+        HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_RESET);
+        isRecording = 0;
+    }
+}
+
+
+void processBuffers() {
+    uint16_t i = 0;
+
+    if (DmaRecHalfBuffCplt == 1) {
+        for (i = 0; i < AUDIO_BUFFER_SIZE / 2; i++) {
+            PlayBuf[i] = RecBuf[i] >> 8;
+        }
+        DmaRecHalfBuffCplt = 0;
+    }
+
+    if (DmaRecBuffCplt == 1) {
+        for (i = AUDIO_BUFFER_SIZE / 2; i < AUDIO_BUFFER_SIZE; i++) {
+            PlayBuf[i] = RecBuf[i] >> 8;
+        }
+        DmaRecBuffCplt = 0;
+    }
 }
 
 
@@ -130,7 +178,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
 
-  HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE);
+  //HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE);
 
 
   /* USER CODE END 2 */
@@ -143,26 +191,19 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
+	    if (DmaRecHalfBuffCplt == 1) {
+	        for (i = 0; i < AUDIO_BUFFER_SIZE / 2; i++) {
+	            PlayBuf[i] = RecBuf[i] >> 8;
+	        }
+	        DmaRecHalfBuffCplt = 0;
+	    }
 
-
-		if (DmaRecHalfBuffCplt == 1) {
-
-			for(i=0; i<AUDIO_BUFFER_SIZE/2; i++)
-				PlayBuf[i] = RecBuf[i]>>8;
-
-
-			DmaRecHalfBuffCplt=0;
-		}
-
-		if (DmaRecBuffCplt == 1) {
-
-
-			for(i=AUDIO_BUFFER_SIZE/2; i<AUDIO_BUFFER_SIZE; i++)
-				PlayBuf[i] = RecBuf[i]>>8;
-
-
-			DmaRecBuffCplt=0;
-		}
+	    if (DmaRecBuffCplt == 1) {
+	        for (i = AUDIO_BUFFER_SIZE / 2; i < AUDIO_BUFFER_SIZE; i++) {
+	            PlayBuf[i] = RecBuf[i] >> 8;
+	        }
+	        DmaRecBuffCplt = 0;
+	    }
 
 
   }
@@ -340,9 +381,9 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
+  htim2.Init.Prescaler = 11999;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 4294967295;
+  htim2.Init.Period = 999;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
