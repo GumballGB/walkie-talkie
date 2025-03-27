@@ -82,6 +82,8 @@ uint8_t isRecording = 0;
 
 uint16_t sineWave[SAMPLE_RATE]; // Global array to store sine wave values
 
+uint16_t speakerWave[SAMPLE_RATE]; // Global array to store values for the speaker
+
 #define ITM_Port32(n) (*((volatile unsigned long *)(0xE0000000 + 4 * n))) // For SWV TraceLog (from Tut.)
 
 /* USER CODE END PV */
@@ -104,12 +106,20 @@ static void MX_TIM3_Init(void);
 /* USER CODE BEGIN 0 */
 
 
-//void generateSineWave(float frequency) { //From lab3. For generating purposes
-//    for (int i = 0; i < SAMPLE_RATE; i++) {
-//        float angle = (2.0f * PI * frequency * i) / SAMPLE_RATE;
-//        sineWave[i] = (uint16_t)( WAVE_HALF_VALUE * (1 + arm_sin_f32(angle)));
-//    }
-//}
+
+void PDMToDAC() {
+
+	for (int i = 0; i < AUDIO_BUFFER_SIZE; i++) {
+	    int32_t sample24 = RecBuf[i] >> 8;     // Remove extra LSBs, now 24-bit signed
+	    int16_t sample12 = sample24 >> 12;     // Extract top 12 bits
+	    uint16_t dacValue = (uint16_t)(sample12 + 2048); // Convert to unsigned
+	    HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, dacValue);
+	}
+
+}
+
+
+
 
 //Button Interrupt, Toggle LED for debug
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
@@ -126,13 +136,15 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
                 isRecording = 0;
             }
 
-            HAL_TIM_Base_Start_IT(&htim2);  // Start the timer interrupt
+
 
             // Start a new recording
             HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE);
             HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_SET); // Indicate recording is in progress
             recordingStartTime = HAL_GetTick();  // Record the time the recording started
             isRecording = 1;
+
+            HAL_TIM_Base_Start_IT(&htim2);  // Start the timer interrupt
 
         }
 
@@ -160,26 +172,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         isRecording = 0;
     }
 }
-
-
-void processBuffers() {
-    uint16_t i = 0;
-
-    if (DmaRecHalfBuffCplt == 1) {
-        for (i = 0; i < AUDIO_BUFFER_SIZE / 2; i++) {
-            PlayBuf[i] = RecBuf[i] >> 8;
-        }
-        DmaRecHalfBuffCplt = 0;
-    }
-
-    if (DmaRecBuffCplt == 1) {
-        for (i = AUDIO_BUFFER_SIZE / 2; i < AUDIO_BUFFER_SIZE; i++) {
-            PlayBuf[i] = RecBuf[i] >> 8;
-        }
-        DmaRecBuffCplt = 0;
-    }
-}
-
 
 
 
@@ -227,7 +219,7 @@ int main(void)
   //HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE);
 //  generateSineWave(1975.53f);
 //
-//  HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t *) sineWave, SAMPLE_COUNT, DAC_ALIGN_12B_R);
+  HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t *) speakerWave, SAMPLE_COUNT, DAC_ALIGN_12B_R);
 
   HAL_TIM_Base_Start_IT(&htim3);
 
@@ -242,19 +234,32 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	    if (DmaRecHalfBuffCplt == 1) {
-	        for (i = 0; i < AUDIO_BUFFER_SIZE / 2; i++) {
-	            PlayBuf[i] = RecBuf[i] >> 8;
-	        }
-	        DmaRecHalfBuffCplt = 0;
-	    }
+	  	// Something very important to know is that when the microphone captures stuff, it is
+	    // the DFSDM module, captures the PDM data. which is 32bits. However, it is converted
+	  	// to 16-bit SIGNED PCM format, where the microphone outputs data in 2's complement.
 
-	    if (DmaRecBuffCplt == 1) {
-	        for (i = AUDIO_BUFFER_SIZE / 2; i < AUDIO_BUFFER_SIZE; i++) {
-	            PlayBuf[i] = RecBuf[i] >> 8;
-	        }
-	        DmaRecBuffCplt = 0;
-	    }
+	    //So the RecBuf contains the PCM audio samples
+
+	  if (DmaRecHalfBuffCplt == 1) {
+	      for (i = 0; i < AUDIO_BUFFER_SIZE / 2; i++) {
+	          int32_t sample24 = RecBuf[i] >> 8;      // Convert to 24-bit signed
+	          int16_t sample12 = sample24 >> 12;      // Extract top 12 bits
+	          uint16_t dacValue = (uint16_t)(sample12 + 2048); // Convert signed to unsigned
+	          speakerWave[i] = dacValue;
+	          //HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, dacValue);
+	      }
+	      DmaRecHalfBuffCplt = 0;
+	  }
+
+	  if (DmaRecBuffCplt == 1) {
+	      for (i = AUDIO_BUFFER_SIZE / 2; i < AUDIO_BUFFER_SIZE; i++) {
+	          int32_t sample24 = RecBuf[i] >> 8;
+	          int16_t sample12 = sample24 >> 12;
+	          uint16_t dacValue = (uint16_t)(sample12 + 2048);
+	          speakerWave[i] = dacValue;
+	      }
+	      DmaRecBuffCplt = 0;
+	  }
 
 
   }
