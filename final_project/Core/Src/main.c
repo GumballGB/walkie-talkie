@@ -133,6 +133,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
                 // Stop the current recording before starting a new one
                 HAL_DFSDM_FilterRegularStop(&hdfsdm1_filter0);
                 HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_RESET);
+
+                HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
                 isRecording = 0;
             }
 
@@ -142,10 +144,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
             HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE);
             HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_SET); // Indicate recording is in progress
             recordingStartTime = HAL_GetTick();  // Record the time the recording started
-            isRecording = 1;
+
+            HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint16_t*)speakerWave, SAMPLE_COUNT, DAC_ALIGN_12B_R);
 
             HAL_TIM_Base_Start_IT(&htim2);  // Start the timer interrupt
 
+            isRecording = 1;
         }
 
 
@@ -387,7 +391,7 @@ static void MX_DFSDM1_Init(void)
   hdfsdm1_filter0.Init.RegularParam.FastMode = ENABLE;
   hdfsdm1_filter0.Init.RegularParam.DmaMode = ENABLE;
   hdfsdm1_filter0.Init.FilterParam.SincOrder = DFSDM_FILTER_SINC3_ORDER;
-  hdfsdm1_filter0.Init.FilterParam.Oversampling = 406;
+  hdfsdm1_filter0.Init.FilterParam.Oversampling = 250;
   hdfsdm1_filter0.Init.FilterParam.IntOversampling = 1;
   if (HAL_DFSDM_FilterInit(&hdfsdm1_filter0) != HAL_OK)
   {
@@ -396,7 +400,7 @@ static void MX_DFSDM1_Init(void)
   hdfsdm1_channel2.Instance = DFSDM1_Channel2;
   hdfsdm1_channel2.Init.OutputClock.Activation = ENABLE;
   hdfsdm1_channel2.Init.OutputClock.Selection = DFSDM_CHANNEL_OUTPUT_CLOCK_SYSTEM;
-  hdfsdm1_channel2.Init.OutputClock.Divider = 25;
+  hdfsdm1_channel2.Init.OutputClock.Divider = 40;
   hdfsdm1_channel2.Init.Input.Multiplexer = DFSDM_CHANNEL_EXTERNAL_INPUTS;
   hdfsdm1_channel2.Init.Input.DataPacking = DFSDM_CHANNEL_STANDARD_MODE;
   hdfsdm1_channel2.Init.Input.Pins = DFSDM_CHANNEL_SAME_CHANNEL_PINS;
@@ -488,9 +492,9 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
+  htim2.Init.Prescaler = 7999;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 4294967295;
+  htim2.Init.Period = 999;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
