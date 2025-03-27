@@ -57,8 +57,8 @@ UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 
-#define AUDIO_BUFFER_SIZE 1024
-#define RECORDING_TIME 5000  // 5 seconds
+#define AUDIO_BUFFER_SIZE 44100
+#define RECORDING_TIME 5000*2  // 5 seconds
 int32_t RecBuf[AUDIO_BUFFER_SIZE]; //storing 8 bits
 int32_t PlayBuf[AUDIO_BUFFER_SIZE];
 
@@ -83,6 +83,7 @@ uint8_t isRecording = 0;
 uint16_t sineWave[SAMPLE_RATE]; // Global array to store sine wave values
 
 uint16_t speakerWave[SAMPLE_RATE]; // Global array to store values for the speaker
+uint16_t sampleIndex = 0;
 
 #define ITM_Port32(n) (*((volatile unsigned long *)(0xE0000000 + 4 * n))) // For SWV TraceLog (from Tut.)
 
@@ -107,19 +108,6 @@ static void MX_TIM3_Init(void);
 
 
 
-void PDMToDAC() {
-
-	for (int i = 0; i < AUDIO_BUFFER_SIZE; i++) {
-	    int32_t sample24 = RecBuf[i] >> 8;     // Remove extra LSBs, now 24-bit signed
-	    int16_t sample12 = sample24 >> 12;     // Extract top 12 bits
-	    uint16_t dacValue = (uint16_t)(sample12 + 2048); // Convert to unsigned
-	    HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, dacValue);
-	}
-
-}
-
-
-
 
 //Button Interrupt, Toggle LED for debug
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
@@ -134,7 +122,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
                 HAL_DFSDM_FilterRegularStop(&hdfsdm1_filter0);
                 HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_RESET);
 
-                HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
+                //HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
                 isRecording = 0;
             }
 
@@ -142,39 +130,51 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
             // Start a new recording
             HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE);
+
+
             HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_SET); // Indicate recording is in progress
+
             recordingStartTime = HAL_GetTick();  // Record the time the recording started
 
-            HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint16_t*)speakerWave, SAMPLE_COUNT, DAC_ALIGN_12B_R);
+            //HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint16_t*)speakerWave, SAMPLE_COUNT, DAC_ALIGN_12B_R);
 
-            HAL_TIM_Base_Start_IT(&htim2);  // Start the timer interrupt
+            HAL_TIM_Base_Start_IT(&htim3);  // Start the timer interrupt
 
             isRecording = 1;
         }
-
-
-        //HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-
-        // Generate the sine wave for the new note
-//        generateSineWave(3800.53f);
-//
-//        // Restart the DAC with DMA to play the new note
-//        HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
-//        HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint16_t*)sineWave, SAMPLE_COUNT, DAC_ALIGN_12B_R);
 
 
 	}
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-    // Check if 5 seconds have passed
-    if (isRecording && (HAL_GetTick() - recordingStartTime) >= RECORDING_TIME) {
-        // Stop recording after 5 seconds
-        HAL_DFSDM_FilterRegularStop(&hdfsdm1_filter0);
-        // Toggle LED to indicate recording has stopped
-        HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_RESET);
-        isRecording = 0;
-    }
+
+
+	if (htim->Instance == TIM3) {
+		// Check if 5 seconds have passed
+		if (isRecording && (HAL_GetTick() - recordingStartTime) >= RECORDING_TIME) {
+			// Stop recording after 5 seconds
+			HAL_DFSDM_FilterRegularStop(&hdfsdm1_filter0);
+			// Toggle LED to indicate recording has stopped
+			HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_RESET);
+			isRecording = 0;
+		}
+	}
+
+
+	if (htim->Instance == TIM2) {  // Check if the interrupt is from TIM2
+
+		//HAL_GPIO_TogglePin(G_LED2_GPIO_Port, G_LED2_Pin);
+
+		// Send the next sine wave value to the DAC
+		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, speakerWave[sampleIndex]);
+
+		// Increment the sample index
+		sampleIndex = (sampleIndex + 1) % SAMPLE_RATE;
+	}
+
+
+
 }
 
 
@@ -220,12 +220,15 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
 
-  //HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE);
-//  generateSineWave(1975.53f);
-//
-  HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t *) speakerWave, SAMPLE_COUNT, DAC_ALIGN_12B_R);
+  //HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t *) speakerWave, SAMPLE_COUNT, DAC_ALIGN_12B_R);
 
-  HAL_TIM_Base_Start_IT(&htim3);
+  HAL_DAC_Start(&hdac1, DAC_CHANNEL_1); // Start DAC channel 1
+  HAL_TIM_Base_Start_IT(&htim2);
+
+  // Initialize speakerWave with silence (mid-point for DAC)
+  for (int i = 0; i < SAMPLE_RATE; i++) {
+      speakerWave[i] = 2048;  // Mid-point for 12-bit DAC
+  }
 
 
   /* USER CODE END 2 */
@@ -244,11 +247,12 @@ int main(void)
 
 	    //So the RecBuf contains the PCM audio samples
 
+
 	  if (DmaRecHalfBuffCplt == 1) {
 	      for (i = 0; i < AUDIO_BUFFER_SIZE / 2; i++) {
 	          int32_t sample24 = RecBuf[i] >> 8;      // Convert to 24-bit signed
-	          int16_t sample12 = sample24 >> 12;      // Extract top 12 bits
-	          uint16_t dacValue = (uint16_t)(sample12 + 2048); // Convert signed to unsigned
+	          int16_t sample12 = RecBuf[i] >> 12;      // Extract top 12 bits
+	          uint16_t dacValue = (uint16_t)((sample12 + 2048)); // Convert signed to unsigned
 	          speakerWave[i] = dacValue;
 	          //HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, dacValue);
 	      }
@@ -258,8 +262,8 @@ int main(void)
 	  if (DmaRecBuffCplt == 1) {
 	      for (i = AUDIO_BUFFER_SIZE / 2; i < AUDIO_BUFFER_SIZE; i++) {
 	          int32_t sample24 = RecBuf[i] >> 8;
-	          int16_t sample12 = sample24 >> 12;
-	          uint16_t dacValue = (uint16_t)(sample12 + 2048);
+	          int16_t sample12 = RecBuf[i] >> 12;
+	          uint16_t dacValue = (uint16_t)((sample12 + 2048));
 	          speakerWave[i] = dacValue;
 	      }
 	      DmaRecBuffCplt = 0;
@@ -349,7 +353,7 @@ static void MX_DAC1_Init(void)
   /** DAC channel OUT1 config
   */
   sConfig.DAC_SampleAndHold = DAC_SAMPLEANDHOLD_DISABLE;
-  sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
+  sConfig.DAC_Trigger = DAC_TRIGGER_T2_TRGO;
   sConfig.DAC_HighFrequency = DAC_HIGH_FREQUENCY_INTERFACE_MODE_ABOVE_80MHZ;
   sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
   sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_DISABLE;
@@ -492,9 +496,9 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 7999;
+  htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 999;
+  htim2.Init.Period = (SYSTEM_FREQ / SAMPLE_RATE) - 1;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -551,9 +555,9 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 0;
+  htim3.Init.Prescaler = 7999;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = SYSTEM_FREQ / SAMPLE_RATE;
+  htim3.Init.Period = 999;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -704,15 +708,12 @@ static void MX_GPIO_Init(void)
 void HAL_DFSDM_FilterRegConvHalfCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
 
-	//HAL_GPIO_TogglePin(G_LED2_GPIO_Port, G_LED2_Pin);
-
 	DmaRecHalfBuffCplt=1;
 }
 
 void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
 
-	//HAL_GPIO_TogglePin(G_LED2_GPIO_Port, G_LED2_Pin);
 
 	DmaRecBuffCplt=1;
 }
