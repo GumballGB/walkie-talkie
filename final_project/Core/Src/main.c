@@ -58,7 +58,7 @@ UART_HandleTypeDef huart1;
 /* USER CODE BEGIN PV */
 
 #define AUDIO_BUFFER_SIZE 44100
-#define RECORDING_TIME 5000*2  // 5 seconds
+#define RECORDING_TIME 5000  // 5 seconds
 int32_t RecBuf[AUDIO_BUFFER_SIZE]; //storing 8 bits
 int32_t PlayBuf[AUDIO_BUFFER_SIZE];
 
@@ -114,33 +114,80 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 
 	if (GPIO_Pin == B_BUTTON_Pin) {
+
+
         // Check if the button is pressed
         if (HAL_GPIO_ReadPin(B_BUTTON_GPIO_Port, B_BUTTON_Pin) == GPIO_PIN_SET) {
 
             if (isRecording) {
                 // Stop the current recording before starting a new one
                 HAL_DFSDM_FilterRegularStop(&hdfsdm1_filter0);
+
+                HAL_TIM_Base_Stop(&htim3); //stop the timer already
+                HAL_TIM_Base_Stop(&htim2);
+
+                isRecording = 0;
+
                 HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_RESET);
 
-                //HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
-                isRecording = 0;
+
+                // Process recorded data
+                for (uint16_t i = 0; i < AUDIO_BUFFER_SIZE; i++) {
+                  int32_t sample24 = RecBuf[i] >> 8;      // Convert to 24-bit signed
+                  int16_t sample12 = RecBuf[i] >> 12;      // Extract top 12 bits
+                  uint16_t dacValue = (uint16_t)((sample12 + 2048)); // Convert signed to unsigned
+                  speakerWave[i] = dacValue;
+                }
+
+
+
+                // Start playback after recording completes
+
+                HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1); // Ensure DAC DMA is stopped first
+
+                HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)speakerWave, AUDIO_BUFFER_SIZE, DAC_ALIGN_12B_R);
+                HAL_TIM_Base_Start(&htim2); // Start DAC trigger timer
+
+
+
             }
 
 
-
-            // Start a new recording
-            HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE);
+            else {
 
 
-            HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_SET); // Indicate recording is in progress
+                // Clear old buffer before new recording
+                //memset(RecBuf, 0, sizeof(RecBuf));
+                //memset(speakerWave, 0, sizeof(speakerWave));
 
-            recordingStartTime = HAL_GetTick();  // Record the time the recording started
+                // Start new recording
+                HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1); // Stop any ongoing playback
+                HAL_TIM_Base_Stop(&htim2);
 
-            //HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint16_t*)speakerWave, SAMPLE_COUNT, DAC_ALIGN_12B_R);
+                // Reset DFSDM filter before starting new recording
+                HAL_DFSDM_FilterRegularStop_DMA(&hdfsdm1_filter0);
+                while (HAL_DFSDM_FilterGetState(&hdfsdm1_filter0) != HAL_DFSDM_FILTER_STATE_READY);
 
-            HAL_TIM_Base_Start_IT(&htim3);  // Start the timer interrupt
 
-            isRecording = 1;
+                // ===== 3. CLEAR BUFFERS (optional but recommended) =====
+                // memset(RecBuf, 0, sizeof(RecBuf));  // Uncomment if needed
+                memset(speakerWave, 2048, sizeof(speakerWave));  // Reset to silence (mid-scale)
+
+                //restart now.
+                HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE);
+
+                //start recording
+                HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_SET);
+
+                // now to fresh start
+                HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)speakerWave, AUDIO_BUFFER_SIZE, DAC_ALIGN_12B_R);
+
+                HAL_TIM_Base_Start_IT(&htim3); // Start recording timer, 5 seconds
+                HAL_TIM_Base_Start_IT(&htim2);
+
+                recordingStartTime = HAL_GetTick();
+                isRecording = 1;
+            }
         }
 
 
@@ -158,22 +205,21 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 			// Toggle LED to indicate recording has stopped
 			HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_RESET);
 			isRecording = 0;
+
+
+            // Process recorded data
+            for (uint16_t i = 0; i < AUDIO_BUFFER_SIZE; i++) {
+              int32_t sample24 = RecBuf[i] >> 8;      // Convert to 24-bit signed
+              int16_t sample12 = RecBuf[i] >> 12;      // Extract top 12 bits
+              uint16_t dacValue = (uint16_t)((sample12 + 2048)); // Convert signed to unsigned
+              speakerWave[i] = dacValue;
+            }
+
+            HAL_TIM_Base_Stop(&htim3);
+
+
 		}
 	}
-
-
-	if (htim->Instance == TIM2) {  // Check if the interrupt is from TIM2
-
-		//HAL_GPIO_TogglePin(G_LED2_GPIO_Port, G_LED2_Pin);
-
-		// Send the next sine wave value to the DAC
-		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, speakerWave[sampleIndex]);
-
-		// Increment the sample index
-		sampleIndex = (sampleIndex + 1) % SAMPLE_RATE;
-	}
-
-
 
 }
 
@@ -189,7 +235,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-	uint16_t i = 0;
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -225,10 +271,6 @@ int main(void)
   HAL_DAC_Start(&hdac1, DAC_CHANNEL_1); // Start DAC channel 1
   HAL_TIM_Base_Start_IT(&htim2);
 
-  // Initialize speakerWave with silence (mid-point for DAC)
-  for (int i = 0; i < SAMPLE_RATE; i++) {
-      speakerWave[i] = 2048;  // Mid-point for 12-bit DAC
-  }
 
 
   /* USER CODE END 2 */
@@ -248,26 +290,26 @@ int main(void)
 	    //So the RecBuf contains the PCM audio samples
 
 
-	  if (DmaRecHalfBuffCplt == 1) {
-	      for (i = 0; i < AUDIO_BUFFER_SIZE / 2; i++) {
-	          int32_t sample24 = RecBuf[i] >> 8;      // Convert to 24-bit signed
-	          int16_t sample12 = RecBuf[i] >> 12;      // Extract top 12 bits
-	          uint16_t dacValue = (uint16_t)((sample12 + 2048)); // Convert signed to unsigned
-	          speakerWave[i] = dacValue;
-	          //HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, dacValue);
-	      }
-	      DmaRecHalfBuffCplt = 0;
-	  }
-
-	  if (DmaRecBuffCplt == 1) {
-	      for (i = AUDIO_BUFFER_SIZE / 2; i < AUDIO_BUFFER_SIZE; i++) {
-	          int32_t sample24 = RecBuf[i] >> 8;
-	          int16_t sample12 = RecBuf[i] >> 12;
-	          uint16_t dacValue = (uint16_t)((sample12 + 2048));
-	          speakerWave[i] = dacValue;
-	      }
-	      DmaRecBuffCplt = 0;
-	  }
+//	  if (DmaRecHalfBuffCplt == 1) {
+//	      for (i = 0; i < AUDIO_BUFFER_SIZE / 2; i++) {
+//	          int32_t sample24 = RecBuf[i] >> 8;      // Convert to 24-bit signed
+//	          int16_t sample12 = RecBuf[i] >> 12;      // Extract top 12 bits
+//	          uint16_t dacValue = (uint16_t)((sample12 + 2048)); // Convert signed to unsigned
+//	          speakerWave[i] = dacValue;
+//	          //HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, dacValue);
+//	      }
+//	      DmaRecHalfBuffCplt = 0;
+//	  }
+//
+//	  if (DmaRecBuffCplt == 1) {
+//	      for (i = AUDIO_BUFFER_SIZE / 2; i < AUDIO_BUFFER_SIZE; i++) {
+//	          int32_t sample24 = RecBuf[i] >> 8;
+//	          int16_t sample12 = RecBuf[i] >> 12;
+//	          uint16_t dacValue = (uint16_t)((sample12 + 2048));
+//	          speakerWave[i] = dacValue;
+//	      }
+//	      DmaRecBuffCplt = 0;
+//	  }
 
 
   }
@@ -709,13 +751,15 @@ void HAL_DFSDM_FilterRegConvHalfCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_
 {
 
 	DmaRecHalfBuffCplt=1;
+
 }
 
 void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
 
-
 	DmaRecBuffCplt=1;
+
+
 }
 
 
