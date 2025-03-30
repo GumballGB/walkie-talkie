@@ -71,6 +71,9 @@ uint8_t button_state = 0;
 
 //FOR THE SPEAKER
 
+#define GUITAR_MIN_FREQ 80   // Low E string
+#define GUITAR_MAX_FREQ 400  // High E harmonic
+
 #define WAVE_MAX_VALUE 4095 // 12-bit DAC resolution 4095
 #define WAVE_HALF_VALUE 2047
 #define BOOST_FACTOR 4 // You can increase this value for more amplification
@@ -82,6 +85,7 @@ uint8_t button_state = 0;
 #define SYSTEM_FREQ 80000000
 #define PI 3.141592f
 
+//for guitar tuning
 #define AUDIO_BUFFER_SIZE (SAMPLE_RATE * RECORD_TIME_SEC)  // = 132,300 samples
 #define FFT_SIZE 256  // Smaller size works for guitar notes
 
@@ -93,6 +97,7 @@ uint16_t sampleIndex = 0;
 
 #define ITM_Port32(n) (*((volatile unsigned long *)(0xE0000000 + 4 * n))) // For SWV TraceLog (from Tut.)
 
+//for guitar tuning
 float32_t fftBuffer[FFT_SIZE];
 arm_rfft_fast_instance_f32 fftHandler;
 uint8_t pitchDetected = 0;
@@ -118,6 +123,135 @@ static void MX_TIM3_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+// HELPER FUNCTIONS FOR GUITAR TUNING //
+
+
+// Find the loudest section of the buffer (handles decaying plucks)
+uint32_t FindLoudSection(int32_t* buffer, uint32_t size) {
+    int32_t maxVal = 0;
+    uint32_t endIndex = size;
+
+    // Find peak volume
+    for(uint32_t i = 0; i < size; i++) {
+        int32_t absVal = buffer[i] > 0 ? buffer[i] : -buffer[i]; // Manual abs
+        if(absVal > maxVal) maxVal = absVal;
+    }
+
+    // Find where signal drops below 20% of peak
+    int32_t threshold = maxVal / 5;
+    for(uint32_t i = 0; i < size; i++) {
+        if((buffer[i] > 0 ? buffer[i] : -buffer[i]) < threshold) {
+            endIndex = i;
+            break;
+        }
+    }
+
+    // Return constrained value
+    return endIndex > FFT_SIZE ? FFT_SIZE : endIndex;
+}
+
+// Autocorrelation-based pitch detection
+float AutoCorrelationTune(int32_t* buffer, uint32_t size) {
+
+    // Calculate lag bounds
+    uint32_t minLag = SAMPLE_RATE / GUITAR_MAX_FREQ; // ~110 samples
+    uint32_t maxLag = SAMPLE_RATE / GUITAR_MIN_FREQ; // ~551 samples
+
+    // Safety checks
+    if(size < maxLag*2) {
+        UART_Print("Need 1.1k samples minimum\r\n");
+        return 0;
+    }
+
+    // Convert uint16_t to float32_t (-1 to +1 range)
+    float32_t floatBuf[size];
+    for(uint32_t i=0; i<size; i++) {
+        floatBuf[i] = (buffer[i] - 2048) / 2048.0f; // 12-bit DAC center at 2048
+    }
+
+    float maxCorrelation = -1;
+    uint32_t bestLag = minLag;
+
+    // Sample every 4th lag for speed (we can interpolate later)
+    for(uint32_t lag = minLag; lag < maxLag; lag += 4) {
+        float correlation = 0;
+        uint32_t compareLength = size - lag;
+
+        // Only check every 4th sample for speed
+        for(uint32_t i = 0; i < compareLength; i += 4) {
+            correlation += floatBuf[i] * floatBuf[i+lag];
+        }
+
+        if(correlation > maxCorrelation) {
+            maxCorrelation = correlation;
+            bestLag = lag;
+        }
+    }
+
+    // Refine around the best lag (+-3 samples)
+    maxCorrelation = -1;
+    uint32_t refineStart = bestLag > 3 ? bestLag - 3 : minLag;
+    uint32_t refineEnd = bestLag + 3 < maxLag ? bestLag + 3 : maxLag;
+
+    for(uint32_t lag = refineStart; lag <= refineEnd; lag++) {
+        float correlation = 0;
+        for(uint32_t i = 0; i < size - lag; i++) {
+            correlation += buffer[i] * buffer[i+lag];
+        }
+
+        if(correlation > maxCorrelation) {
+            maxCorrelation = correlation;
+            bestLag = lag;
+        }
+    }
+
+    return (float)SAMPLE_RATE / bestLag;
+}
+
+
+// Convert frequency to note name and cents
+void DisplayTuning(float freq) {
+
+	//the guitar notes!
+    const char* notes[] = {"E2", "A2", "D3", "G3", "B3", "E4"};
+    const float targets[] = {82.41, 110.0, 146.83, 196.0, 246.94, 329.63};
+    char msg[32];
+
+    // Find closest guitar string
+    uint8_t closest = 0;
+    float minDiff = fabsf(freq - targets[0]);
+    for(uint8_t i = 1; i < 6; i++) {
+        float diff = fabsf(freq - targets[i]);
+        if(diff < minDiff) {
+            minDiff = diff;
+            closest = i;
+        }
+    }
+
+    // Calculate cents (1/100th of a semitone)
+    float cents = 1200 * log2f(freq / targets[closest]);
+
+
+    if(fabsf(cents) < 5) {
+        snprintf(msg, sizeof(msg), "%s: Perfect!\r\n", notes[closest]);
+    }
+    else if(cents < 0) {
+        snprintf(msg, sizeof(msg), "%s: %d cents LOW\r\n",
+                notes[closest], (int)fabsf(cents));
+    }
+    else {
+        snprintf(msg, sizeof(msg), "%s: %d cents HIGH\r\n",
+                notes[closest], (int)cents);
+    }
+
+    HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+
+
+
+// HELPER FUNCTIONS FOR GUITAR TUNING
 
 // Helper function to send strings over UART
 void UART_Print(const char *message) {
@@ -198,6 +332,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
                 //stop the timer now
                 HAL_TIM_Base_Stop(&htim2);
 
+
+
+
+//                Mic-->PDM[PDM Data in RecBuf]
+//                PDM-->DFSDM[DFSDM Filter]
+//                DFSDM-->PCM[PCM in speakerWave]
+
                 // Process recorded data
                 for (uint16_t i = 0; i < AUDIO_BUFFER_SIZE; i++) {
 
@@ -217,25 +358,42 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
                 	     boostedSample = -2048; // Max negative value for 12-bit DAC
                 	 }
 
-                	    // Convert the boosted value back to unsigned format for the DAC (0-4095)
-                	    uint16_t dacValue = (uint16_t)(boostedSample + 2048);
+                	 // Convert the boosted value back to unsigned format for the DAC (0-4095)
+                	 uint16_t dacValue = (uint16_t)(boostedSample + 2048);
 
-                	    // Ensure the final DAC value is within the DAC's valid range
-                	    if (dacValue > 4095) {
-                	        dacValue = 4095; // Maximum value for 12-bit DAC
-                	    } else if (dacValue < 0) {
-                	        dacValue = 0; // Minimum value for 12-bit DAC
-                	    }
+                	 // Ensure the final DAC value is within the DAC's valid range
+                	 if (dacValue > 4095) {
+                	    dacValue = 4095; // Maximum value for 12-bit DAC
+                	 } else if (dacValue < 0) {
+                	    dacValue = 0; // Minimum value for 12-bit DAC
+                	 }
 
-                	    // Store the DAC value in the speakerWave buffer
-                	    speakerWave[i] = dacValue;
-
-
+                	 // Store the DAC value in the speakerWave buffer
+                	 speakerWave[i] = dacValue;
 
                 }
 
 
-				UART_Print("[playing back...]\r\n");
+                //PROCESS AUDIO
+                // Stop recording and tune
+
+                // Problems are being caused here
+
+                //uint32_t usableSamples = FindLoudSection(RecBuf, AUDIO_BUFFER_SIZE);
+
+                float freq = AutoCorrelationTune(speakerWave, AUDIO_BUFFER_SIZE);
+
+                if(freq > 70 && freq < 400) { // Valid guitar range
+                    DisplayTuning(freq);
+
+                } else {
+                    UART_Print("No note detected - try again\r\n");
+                }
+                // ... existing playback code ...
+                //DONE PROCESSING AUDIO
+
+
+				UART_Print("[playing back through speaker...]\r\n");
                 //just in case stop DMA
                 //HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1); // Ensure DAC DMA is stopped first
 
@@ -254,7 +412,15 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 
-
+    if(htim == &htim3 && button_state == 1) {
+        uint32_t usableSamples = FindLoudSection(RecBuf, AUDIO_BUFFER_SIZE);
+        if(usableSamples > FFT_SIZE/2) {
+            float freq = AutoCorrelationTune(RecBuf, usableSamples);
+            if(freq > 70 && freq < 400) {
+                DisplayTuning(freq);
+            }
+        }
+    }
 }
 
 
@@ -327,10 +493,6 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	    // 2. Apply window function (reduces noise)
-	    for(uint32_t i = 0; i < FFT_SIZE; i++) {
-	        fftBuffer[i] *= 0.5f * (1.0f - arm_cos_f32(2*PI*i/(FFT_SIZE-1)));
-	    }
 	  	// Something very important to know is that when the microphone captures stuff, it is
 	    // the DFSDM module, captures the PDM data. which is 32bits. However, it is converted
 	  	// to 16-bit SIGNED PCM format, where the microphone outputs data in 2's complement.
