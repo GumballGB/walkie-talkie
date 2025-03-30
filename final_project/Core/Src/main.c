@@ -83,6 +83,8 @@ uint8_t button_state = 0;
 #define PI 3.141592f
 
 #define AUDIO_BUFFER_SIZE (SAMPLE_RATE * RECORD_TIME_SEC)  // = 132,300 samples
+#define FFT_SIZE 256  // Smaller size works for guitar notes
+
 
 int32_t RecBuf[AUDIO_BUFFER_SIZE];
 
@@ -90,6 +92,13 @@ uint16_t speakerWave[SAMPLE_RATE * 5]; // Global array to store values for the s
 uint16_t sampleIndex = 0;
 
 #define ITM_Port32(n) (*((volatile unsigned long *)(0xE0000000 + 4 * n))) // For SWV TraceLog (from Tut.)
+
+float32_t fftBuffer[FFT_SIZE];
+arm_rfft_fast_instance_f32 fftHandler;
+uint8_t pitchDetected = 0;
+float currentPitch = 0;
+char currentNote[8];
+
 
 /* USER CODE END PV */
 
@@ -260,7 +269,11 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+	// Set up FFT
+	arm_rfft_fast_init_f32(&fftHandler, FFT_SIZE);
 
+	// Set up a timer for periodic pitch detection (every 100ms)
+	HAL_TIM_Base_Start_IT(&htim3);  // Using TIM3 for periodic detection
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -314,6 +327,10 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
+	    // 2. Apply window function (reduces noise)
+	    for(uint32_t i = 0; i < FFT_SIZE; i++) {
+	        fftBuffer[i] *= 0.5f * (1.0f - arm_cos_f32(2*PI*i/(FFT_SIZE-1)));
+	    }
 	  	// Something very important to know is that when the microphone captures stuff, it is
 	    // the DFSDM module, captures the PDM data. which is 32bits. However, it is converted
 	  	// to 16-bit SIGNED PCM format, where the microphone outputs data in 2's complement.
