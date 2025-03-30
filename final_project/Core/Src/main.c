@@ -23,6 +23,8 @@
 /* USER CODE BEGIN Includes */
 #include "stm32l4xx_hal.h"
 #include "arm_math.h"
+#include "stdio.h"
+#include "string.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -108,8 +110,18 @@ static void MX_TIM3_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+// Helper function to send strings over UART
+void UART_Print(const char *message) {
+    HAL_UART_Transmit(&huart1, (uint8_t*)message, strlen(message), HAL_MAX_DELAY);
+}
 
 
+// This is insanely helpful to solve a lot of problem
+void UART_Print_Error(const char *message, HAL_StatusTypeDef status) {
+    char err_buf[64];
+    snprintf(err_buf, sizeof(err_buf), "%s (Error: %d)\r\n", message, status);
+    HAL_UART_Transmit(&huart1, (uint8_t*)err_buf, strlen(err_buf), HAL_MAX_DELAY);
+}
 
 //Button Interrupt, Toggle LED for debug
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
@@ -127,6 +139,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
         	//ready to record. It also means we need to wipe out any recBuf
         	if (button_state == 0) {
 
+				UART_Print("[recording...]\r\n");
 
                 //just in case stop DMA
                 //stop the timer now
@@ -135,15 +148,25 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
                 HAL_DFSDM_FilterRegularStop_DMA(&hdfsdm1_filter0);  // Ensure DFSDM DMA is stopped
 
 
+				//clear Buffers
                 memset(RecBuf, 0, sizeof(RecBuf));  // Uncomment if needed
                 memset(speakerWave, 2048, sizeof(speakerWave));  // Reset to silence (mid-scale)
+
+//                // Reinitialize DFSDM completely
+//                MX_DFSDM1_Init();
+//                MX_DMA_Init(); // Reinitialize DMA as well
 
                 //lit the LED
                 HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_SET);
 
                 //start the microphone DMA
 
-                HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE);
+                // Start DMA with fresh configuration
+                if (HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, RecBuf, AUDIO_BUFFER_SIZE) != HAL_OK) {
+                    UART_Print("DFSDM start failed!\r\n");
+                }
+
+
                 HAL_TIM_Base_Start(&htim2); // Start DAC trigger timer
 
 
@@ -153,6 +176,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
         	}
         	else if (button_state == 1) {
+
+        	   // Print status message
+                UART_Print("[processing audio...]\r\n");
 
                 //unlit the LED
                 HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_RESET);
@@ -165,31 +191,22 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
                 // Process recorded data
                 for (uint16_t i = 0; i < AUDIO_BUFFER_SIZE; i++) {
-//                  int32_t sample24 = RecBuf[i] >> 8;      // Convert to 24-bit signed
-//                  int16_t sample12 = sample24 >> 12;      // Extract top 12 bits
-//
-//                  uint16_t dacValue = (uint16_t)(sample12 + 2048); // Convert signed to unsigned
-//                  if
-//				  	  (dacValue > 4095) dacValue = 4095;
-//                  else if
-//				  	  (dacValue < 0) dacValue = 0;
-//                  speakerWave[i] = dacValue;
 
                 	// Convert to 24-bit signed
-                	    int32_t sample24 = RecBuf[i] >> 8;
+                	int32_t sample24 = RecBuf[i] >> 8;
 
-                	    // Extract the top 12 bits
-                	    int16_t sample12 = sample24 >> 12;
+                	 // Extract the top 12 bits
+                	 int16_t sample12 = sample24 >> 12;
 
-                	    // Apply the boost by multiplying by the boost factor
-                	    int32_t boostedSample = sample12 * BOOST_FACTOR;
+                	 // Apply the boost by multiplying by the boost factor
+                	 int32_t boostedSample = sample12 * BOOST_FACTOR;
 
-                	    // Ensure the value doesn't exceed DAC range (0 to 4095)
-                	    if (boostedSample > 2047) {
-                	        boostedSample = 2047;  // Max positive value for 12-bit DAC
-                	    } else if (boostedSample < -2048) {
-                	        boostedSample = -2048; // Max negative value for 12-bit DAC
-                	    }
+                	 // Ensure the value doesn't exceed DAC range (0 to 4095)
+                	 if (boostedSample > 2047) {
+                	     boostedSample = 2047;  // Max positive value for 12-bit DAC
+                	 } else if (boostedSample < -2048) {
+                	     boostedSample = -2048; // Max negative value for 12-bit DAC
+                	 }
 
                 	    // Convert the boosted value back to unsigned format for the DAC (0-4095)
                 	    uint16_t dacValue = (uint16_t)(boostedSample + 2048);
@@ -208,6 +225,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
                 }
 
+
+				UART_Print("[playing back...]\r\n");
                 //just in case stop DMA
                 //HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1); // Ensure DAC DMA is stopped first
 
@@ -271,8 +290,11 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
+    // Initialize UART and send welcome message
+  UART_Print("\r\nAudio Recorder/Player Ready\r\n");
+  UART_Print("Press button to start recording\r\n");
+  UART_Print("Press button again to play back\r\n\r\n");
 
-  //HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t *) speakerWave, SAMPLE_COUNT, DAC_ALIGN_12B_R);
 
   HAL_DAC_Start(&hdac1, DAC_CHANNEL_1); // Start DAC channel 1
   HAL_TIM_Base_Start_IT(&htim2);
@@ -295,7 +317,13 @@ int main(void)
 	  	// Something very important to know is that when the microphone captures stuff, it is
 	    // the DFSDM module, captures the PDM data. which is 32bits. However, it is converted
 	  	// to 16-bit SIGNED PCM format, where the microphone outputs data in 2's complement.
-
+		    // Debug output - show first sample value
+    if(button_state == 1) { // Only when recording
+        char dbg_msg[64];
+        snprintf(dbg_msg, sizeof(dbg_msg), "First sample: %ld\r\n", RecBuf[0]);
+        HAL_UART_Transmit(&huart1, (uint8_t*)dbg_msg, strlen(dbg_msg), HAL_MAX_DELAY);
+    }
+    HAL_Delay(500);
 
 
   }
@@ -412,7 +440,7 @@ static void MX_DFSDM1_Init(void)
 {
 
   /* USER CODE BEGIN DFSDM1_Init 0 */
-
+	HAL_StatusTypeDef status;
   /* USER CODE END DFSDM1_Init 0 */
 
   /* USER CODE BEGIN DFSDM1_Init 1 */
@@ -425,10 +453,15 @@ static void MX_DFSDM1_Init(void)
   hdfsdm1_filter0.Init.FilterParam.SincOrder = DFSDM_FILTER_SINC3_ORDER;
   hdfsdm1_filter0.Init.FilterParam.Oversampling = 250;
   hdfsdm1_filter0.Init.FilterParam.IntOversampling = 1;
-  if (HAL_DFSDM_FilterInit(&hdfsdm1_filter0) != HAL_OK)
-  {
-    Error_Handler();
-  }
+
+  //CHANGED to know why Filter is not starting again.
+  status = HAL_DFSDM_FilterInit(&hdfsdm1_filter0);
+    if(status != HAL_OK) {
+        UART_Print_Error("Filter Init Failed", status);
+        Error_Handler();
+    }
+
+
   hdfsdm1_channel2.Instance = DFSDM1_Channel2;
   hdfsdm1_channel2.Init.OutputClock.Activation = ENABLE;
   hdfsdm1_channel2.Init.OutputClock.Selection = DFSDM_CHANNEL_OUTPUT_CLOCK_SYSTEM;
@@ -442,14 +475,20 @@ static void MX_DFSDM1_Init(void)
   hdfsdm1_channel2.Init.Awd.Oversampling = 1;
   hdfsdm1_channel2.Init.Offset = 0;
   hdfsdm1_channel2.Init.RightBitShift = 0x00;
-  if (HAL_DFSDM_ChannelInit(&hdfsdm1_channel2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_DFSDM_FilterConfigRegChannel(&hdfsdm1_filter0, DFSDM_CHANNEL_2, DFSDM_CONTINUOUS_CONV_ON) != HAL_OK)
-  {
-    Error_Handler();
-  }
+
+
+    status = HAL_DFSDM_ChannelInit(&hdfsdm1_channel2);
+    if(status != HAL_OK) {
+        UART_Print_Error("Channel Init Failed", status);
+        Error_Handler();
+    }
+
+    /* Associate channel with filter */
+    status = HAL_DFSDM_FilterConfigRegChannel(&hdfsdm1_filter0, DFSDM_CHANNEL_2, DFSDM_CONTINUOUS_CONV_ON);
+    if(status != HAL_OK) {
+        UART_Print_Error("Filter Config Failed", status);
+        Error_Handler();
+    }
   /* USER CODE BEGIN DFSDM1_Init 2 */
 
   /* USER CODE END DFSDM1_Init 2 */
