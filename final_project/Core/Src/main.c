@@ -57,11 +57,10 @@ UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 
-#define AUDIO_BUFFER_SIZE 44100
+//#define AUDIO_BUFFER_SIZE 44100
 
-#define TIMER_PERIOD (HAL_RCC_GetHCLKFreq() / SAMPLE_RATE)  // Calculate the correct timer period
+#define TIMER_PERIOD (SYSTEM_FREQ / SAMPLE_RATE)  // Calculate the correct timer period
 
-int32_t RecBuf[AUDIO_BUFFER_SIZE];
 
 uint8_t DmaRecHalfBuffCplt=0;
 uint8_t DmaRecBuffCplt=0;
@@ -72,17 +71,20 @@ uint8_t button_state = 0;
 
 #define WAVE_MAX_VALUE 4095 // 12-bit DAC resolution 4095
 #define WAVE_HALF_VALUE 2047
-#define BOOST_FACTOR 3 // You can increase this value for more amplification
+#define BOOST_FACTOR 4 // You can increase this value for more amplification
 #define SAMPLE_COUNT 1000  // Number of samples in one sine wave cycle
+#define RECORD_TIME_SEC 1      // Record up to 3 seconds
 
 // recall Nyquist : sample rate >= 2 * max freq
 #define SAMPLE_RATE 44100 // sample rate
-#define SYSTEM_FREQ 120000000
+#define SYSTEM_FREQ 80000000
 #define PI 3.141592f
 
-uint16_t sineWave[SAMPLE_RATE]; // Global array to store sine wave values
+#define AUDIO_BUFFER_SIZE (SAMPLE_RATE * RECORD_TIME_SEC)  // = 132,300 samples
 
-uint16_t speakerWave[SAMPLE_RATE]; // Global array to store values for the speaker
+int32_t RecBuf[AUDIO_BUFFER_SIZE];
+
+uint16_t speakerWave[SAMPLE_RATE * 5]; // Global array to store values for the speaker
 uint16_t sampleIndex = 0;
 
 #define ITM_Port32(n) (*((volatile unsigned long *)(0xE0000000 + 4 * n))) // For SWV TraceLog (from Tut.)
@@ -524,7 +526,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = TIMER_PERIOD - 1;
+  htim2.Init.Period = (TIMER_PERIOD - 1) * 4;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
