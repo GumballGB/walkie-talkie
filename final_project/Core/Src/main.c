@@ -327,7 +327,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
                 HAL_GPIO_WritePin(G_LED2_GPIO_Port, G_LED2_Pin, GPIO_PIN_RESET);
 
                 // Stop the current recording before starting a new one
-                HAL_DFSDM_FilterRegularStop(&hdfsdm1_filter0);
+                HAL_DFSDM_FilterRegularStop_DMA(&hdfsdm1_filter0);
 
                 //stop the timer now
                 HAL_TIM_Base_Stop(&htim2);
@@ -381,7 +381,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
                 //uint32_t usableSamples = FindLoudSection(RecBuf, AUDIO_BUFFER_SIZE);
 
-                float freq = AutoCorrelationTune(speakerWave, AUDIO_BUFFER_SIZE);
+                float freq = AutoCorrelationTune(RecBuf, AUDIO_BUFFER_SIZE);
 
                 if(freq > 70 && freq < 400) { // Valid guitar range
                     DisplayTuning(freq);
